@@ -26,5 +26,22 @@ describe('Math utils', () => {
       expect(clamp(-0.5, 0, 10)).toBe(0);
       expect(clamp(10.1, 0, 10)).toBe(10);
     });
+
+    it('should handle reversed bounds by swapping them', () => {
+      expect(clamp(5, 10, 0)).toBe(5);
+      expect(clamp(-5, -1, -10)).toBe(-5);
+    });
+
+    it('should return NaN when any argument is NaN', () => {
+      expect(clamp(NaN, 0, 10)).toBeNaN();
+      expect(clamp(5, NaN, 10)).toBeNaN();
+      expect(clamp(5, 0, NaN)).toBeNaN();
+    });
+
+    it('should respect infinity bounds', () => {
+      expect(clamp(5, -Infinity, Infinity)).toBe(5);
+      expect(clamp(Infinity, -10, 10)).toBe(10);
+      expect(clamp(-Infinity, -10, 10)).toBe(-10);
+    });
   });
 });
