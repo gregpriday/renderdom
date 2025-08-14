@@ -1,318 +1,291 @@
 # RenderDOM
 
-Frame-accurate DOM renderer with Playwright + FFmpeg and JSONL progress.
+**Frame‑accurate DOM renderer** powered by **Playwright** + **FFmpeg**, with real‑time **JSONL** progress.
 
-RenderDOM is a framework-agnostic video renderer that captures DOM animations frame-by-frame using Playwright browsers and encodes them to video using FFmpeg. It supports parallel capture with multiple workers and provides real-time progress feedback via JSON Lines (JSONL) format.
+RenderDOM captures web/DOM animations deterministically—one frame at a time—inside headless Chromium, then pipes images to FFmpeg to produce a video. It supports parallel capture, multiple codecs, and a minimal "scene adapter" contract for precise control. Defaults and CLI/API contracts below mirror the implementation in @src/cli.ts, @src/config.ts, @src/orchestrator.ts, and @src/encode/ffmpeg.ts.
 
-## Features
+---
 
-- **Framework-agnostic**: Works with any DOM-based animation (Anime.js, GSAP, React/Remotion, plain JS)
-- **Frame-accurate rendering**: Deterministic frame capture based on `frameIndex / fps`
-- **Parallel processing**: Multiple browser pages capture frames concurrently
-- **Real-time progress**: JSONL output for integration with preview applications
-- **Multiple codecs**: H.264, VP9, and ProRes support
-- **Flexible input**: Load from URLs, HTML files, or inline HTML
+## Highlights
 
-## Installation
+* **Framework‑agnostic:** Works with plain JS, Anime.js, GSAP, React/Remotion, etc.
+* **Deterministic, frame‑accurate:** You set state for each frame `t = frameIndex / fps`. CSS animations are frozen by default for repeatability.
+* **Parallel capture:** Multiple Chromium pages capture frames concurrently. Default concurrency ≈ half the CPU cores.
+* **Real‑time progress:** Optional JSON Lines (JSONL) to stdout, plus programmatic events.
+* **Codecs:** H.264, VP9, ProRes; pixel formats `yuv420p|yuva420p`.
+* **Flexible input:** Inline HTML, local file, or external page URL.
+
+---
+
+## Requirements
+
+* **Node.js 20+** (as enforced by @package.json `"engines"`).
+* **FFmpeg** available on your PATH.
+* **Playwright** is bundled as a dependency; if a browser launch fails, run `npx playwright install` once.
+
+---
+
+## Install
 
 ```bash
 npm install renderdom
 ```
 
-You'll also need FFmpeg installed on your system:
+You'll also need FFmpeg:
 
-```bash
-# macOS
-brew install ffmpeg
+* macOS: `brew install ffmpeg`
+* Debian/Ubuntu: `sudo apt install ffmpeg`
+* Windows: downloads at ffmpeg.org
 
-# Ubuntu/Debian  
-sudo apt install ffmpeg
+(The CLI is exposed as the `renderdom` binary from the package `bin` field.)
 
-# Windows
-# Download from https://ffmpeg.org/download.html
-```
+---
 
-## Quick Start
+## Quick start
 
-### CLI Usage
+### 1) CLI
 
 ```bash
 renderdom render \
   --adapter ./my-adapter.js \
   --html ./scene.html \
   --width 1920 --height 1080 --fps 60 \
-  --codec h264 --crf 18 \
+  --codec h264 --crf 18 --preset medium \
+  --pixfmt yuv420p \
   --verbose \
   -o output.mp4
 ```
 
-### Node.js API
+* `--adapter` must point to a browser‑runnable script that registers `window.__RenderDOM__.adapter` (UMD/IIFE is simplest). See "Scene Adapters."
 
-```javascript
+### 2) Node API
+
+```ts
 import { renderDOM } from 'renderdom';
 
-const { events, promise } = renderDOM({
+const { events, promise, cancel } = renderDOM({
   adapterPath: './my-adapter.js',
-  html: '<html>...</html>',
+  html: '<!doctype html><html><body></body></html>',
   width: 1920,
   height: 1080,
   fps: 60,
-  outputPath: 'output.mp4'
+  outputPath: 'output.mp4',
+  verbose: true
 });
 
-// Listen to progress events
+// Optional progress
 events.on('capture-progress', (e) => {
-  console.log(`Progress: ${e.percent}% (${e.done}/${e.total})`);
+  console.log(`Capture ${e.done}/${e.total} (${e.percent.toFixed(1)}%)`);
 });
 
-// Wait for completion
-const result = await promise;
-console.log('Video saved to:', result.outputPath);
+// Await completion
+const { outputPath } = await promise;
+console.log('Saved:', outputPath);
+
+// cancel() exists (cooperative for now)
 ```
+
+The API returns `{ events, promise, cancel }`. Events include `capture-start`, `capture-progress`, `encode-start`, `encode-progress`, `done`, and `error` (see @src/types.ts).
+
+---
 
 ## Scene Adapters
 
-RenderDOM uses **Scene Adapters** to control animation playback. An adapter is a JavaScript file that exposes a specific interface via `window.__RenderDOM__.adapter`.
+A **scene adapter** is a tiny script that **deterministically** sets your DOM to the exact state for a given frame/time. Register it on `window.__RenderDOM__.adapter`.
 
-### Basic Adapter Example
+**Contract (minimal & deterministic)**
 
-```javascript
-// adapter.js
-(function(){
-  const DURATION_MS = 3000; // 3 second animation
-  
-  const adapter = {
-    // Required: Return total duration in milliseconds
-    getDurationMs() {
-      return DURATION_MS;
-    },
-    
-    // Required: Render a specific frame
-    async renderFrame(frameIndex, fps) {
-      const timeMs = (frameIndex / fps) * 1000;
-      const progress = timeMs / DURATION_MS;
-      
-      // Animate your DOM elements
-      const element = document.getElementById('my-element');
-      element.style.transform = `translateX(${progress * 500}px)`;
-    },
-    
-    // Optional: Preload assets
-    async ensureAssets() {
-      // Load images, fonts, etc.
-    }
-  };
-  
-  // Register the adapter
-  window.__RenderDOM__ = { adapter };
-})();
-```
-
-### Adapter Contract
-
-```typescript
-interface SceneAdapter {
-  /** Total duration in milliseconds */
-  getDurationMs(): number;
-  
-  /** Render a specific frame (must be deterministic) */
-  renderFrame(frameIndex: number, fps: number): Promise<void> | void;
-  
-  /** Optional: Preload fonts, images, etc. */
-  ensureAssets?(): Promise<void> | void;
+```ts
+{
+  getDurationMs(): number;                         // total duration in ms
+  renderFrame(frameIndex: number, fps: number):    // set DOM to state at t = fi/fps
+    void | Promise<void>;
+  ensureAssets?(): Promise<void>;                  // optional preload step
+  afterFrame?(): Promise<void>;                    // optional post-commit hook
 }
 ```
 
-**Important**: The `renderFrame` function must be **deterministic** - calling it with the same `frameIndex` and `fps` should always produce the same visual result.
+Rules enforced by the capture pipeline in @src/browser/page-bridge.ts and @src/orchestrator.ts:
 
-## Progress Output (JSONL)
+* `renderFrame(fi,fps)` must compute state **purely** from `fi` and `fps` (no `Date.now()`, timers, or ambient timelines).
+* RenderDOM inserts CSS to **freeze animations/transitions by default**; rely on your adapter to set styles.
+* If you return a promise (e.g., to finish a decode), it's awaited; then RenderDOM waits for paint, fonts (and optionally image decode via `waitImages`) before screenshotting.
 
-When using `--verbose` or the Node API, RenderDOM outputs progress as JSON Lines:
+**Example (UMD/IIFE style)**
+@examples/basic-scene/adapter.js shows a simple moving box animation, loaded by @examples/basic-scene/index.html. You can run it via @examples/basic-scene/run.mjs.
 
-```json
-{"type":"capture-start","totalFrames":180}
-{"type":"capture-progress","done":45,"total":180,"percent":25,"frame":44}
-{"type":"encode-progress","outTimeMs":1500000}
-{"type":"done","outputPath":"output.mp4"}
-```
+---
 
-Event types:
-- `capture-start`: Frame capture begins
-- `capture-progress`: Frame capture progress
-- `encode-progress`: FFmpeg encoding progress  
-- `done`: Rendering complete
-- `error`: Error occurred
+## CLI reference
 
-## CLI Reference
+Command: `renderdom render` (see @src/cli.ts)
 
-```bash
-renderdom render [options]
+**Required**
 
-Required:
-  --adapter <path>     Path to adapter script (UMD/IIFE format)
-  -o, --out <path>     Output video path
+* `--adapter <path>` Path to adapter script (UMD/IIFE recommended; must set `window.__RenderDOM__.adapter`).
+* `-o, --out <path>` Output video path.
 
-Video Options:
-  --width <n>          Video width (default: 1920)
-  --height <n>         Video height (default: 1080) 
-  --fps <n>            Frames per second (default: 60)
-  --start <n>          Start frame index (default: 0)
-  --end <n>            End frame index (inclusive)
+**Video**
 
-Source Options:
-  --html <path>        Local HTML file to render
-  --page-url <url>     External URL to load
+* `--width <n>` default **1920**
+* `--height <n>` default **1080**
+* `--fps <n>` default **60**
+* `--start <n>` start frame (default **0**)
+* `--end <n>` end frame (**inclusive**)
 
-Encoding Options:
-  --codec <c>          h264|vp9|prores (default: h264)
-  --crf <n>            Quality factor 0-51 (default: 18)
-  --preset <s>         FFmpeg preset (default: medium)
-  --pixfmt <p>         yuv420p|yuva420p (default: yuv420p)
-  --image-format <f>   png|jpeg (default: png)
-  --image-quality <n>  JPEG quality 0-100 (default: 92)
-  --audio <path>       Audio file to merge
+**Source**
 
-Performance Options:
-  --concurrency <n>    Parallel browser pages (default: CPU cores / 2)
+* `--html <path>` Local HTML file to **inline** (read and embedded as a data URL).
+* `--page-url <url>` Load an external URL instead.
 
-Browser Options:
-  --chromium-flag <f>  Chromium flag (repeatable)
+**Encoding**
 
-Output Options:
-  --verbose            Emit JSONL progress to stdout
-```
+* `--codec <c>` `h264|vp9|prores` (default **h264**)
+* `--crf <n>` (0–51, default **18**)
+* `--preset <s>` FFmpeg preset (default **medium**)
+* `--pixfmt <p>` `yuv420p|yuva420p` (default **yuv420p**)
+* `--image-format <f>` `png|jpeg` (default **png**)
+* `--image-quality <n>` JPEG quality 0–100 (default **92**)
+* `--audio <path>` Optional audio file to mux (duration is truncated to the shorter stream with `-shortest`).
+
+**Performance**
+
+* `--concurrency <n>` Number of parallel pages (default: `max(1, floor(cpuCount/2))`).
+
+**Browser**
+
+* `--chromium-flag <flag>` Repeatable Chromium flag (merged with safe defaults in @src/browser/provider.ts).
+
+**Determinism**
+
+* `--disable-css-animations` Disables CSS animations/transitions. **This behavior is enabled by default** in the pipeline unless you explicitly turn it off in code/config. (The CLI help string currently says "default: false," but the effective default in @src/config.ts and @src/orchestrator.ts is **true**.)
+
+**Output & diagnostics**
+
+* `--debug-frames-dir <path>` Write numbered frames to a directory **instead of** encoding to a video (useful in tests/golden runs).
+  Files are zero‑padded (e.g., `000000.png`) and use `.png` or `.jpg` based on `--image-format`.
+* `--verbose` Emit JSONL progress to stdout.
+
+---
+
+## API reference
+
+`renderDOM(config)` returns `{ events, promise, cancel }`. The resolved value from `promise` is `{ outputPath }`. Event names and payloads are defined in @src/types.ts.
+
+**Config (with defaults from @src/config.ts):**
+
+* `width` **1920**, `height` **1080**, `fps` **60**
+* `startFrame` **0**, `endFrame` optional (if omitted: derived from adapter duration and fps)
+* `concurrency` optional (default computed from CPU cores)
+* `codec` **'h264'**, `crf` **18**, `preset` **'medium'**, `pixelFormat` **'yuv420p'**
+* `imageFormat` **'png'**, `imageQuality` **92**
+* `audioPath` optional
+* `chromiumFlags` `string[]` (default `[]`)
+* `pageUrl` optional, `html` optional (inline HTML string)
+* `frameTimeoutMs` **15000**
+* `verbose` optional
+* `debugFramesDir` optional
+* `disableCssAnimations` **true** (effective default)
+
+**Adapter duration → frame count:**
+When `endFrame` is omitted, total frames are computed from `adapter.getDurationMs()` and `fps`. When `startFrame`/`endFrame` are provided, `endFrame` is **inclusive**. See @src/orchestrator.ts.
+
+**Events & JSONL:**
+If `verbose: true`, JSONL is written to stdout, and the same events are emitted on the `events` emitter:
+`capture-start`, `capture-progress`, `encode-start`, `encode-progress`, `done`, `error`. See @src/progress.ts and tests under @tests/*.
+
+---
 
 ## Examples
 
-### Basic Animation
+* **Basic moving box**: @examples/basic-scene (HTML + adapter + runner).
+  Try `node examples/basic-scene/run.mjs` from the repo root to render a 1080p60 H.264 MP4 with JSONL progress.
 
-```html
-<!-- scene.html -->
-<!DOCTYPE html>
-<html>
-<head>
-  <style>
-    #box {
-      width: 100px;
-      height: 100px;
-      background: #4CAF50;
-      position: absolute;
-    }
-  </style>
-</head>
-<body>
-  <div id="box"></div>
-</body>
-</html>
+* **Golden‑frame testing**: `npm run update-golden` uses @scripts/generate-golden.mjs to produce PNG frames for regression comparison in @tests/golden.
+
+---
+
+## How it works (architecture)
+
+* **Orchestrator** allocates pages, sequences frames, and manages queues.
+* **Browser provider** launches Chromium and sets viewport.
+* **Page bridge** injects your adapter, calls `renderFrame`, waits for paint/fonts/images, and applies `afterFrame`.
+* **Capture** takes a screenshot buffer (`png` or `jpeg`).
+* **Encoder** streams images via `image2pipe` into FFmpeg with the requested codec, pixel format, and CRF/preset.
+* **Progress bus** optionally writes JSONL to stdout and emits events.
+  See @src/orchestrator.ts, @src/browser/*, @src/capture.ts, @src/encode/ffmpeg.ts, and @src/progress.ts.
+
+---
+
+## Progress output (JSONL)
+
+Example (stdout when `--verbose` or `verbose: true`):
+
+```
+{"type":"capture-start","totalFrames":180}
+{"type":"capture-progress","done":45,"total":180,"percent":25,"frame":44}
+{"type":"encode-start","args":["-f","image2pipe", "..."]}
+{"type":"encode-progress","outTimeMs":1500000,"percent":83.33}
+{"type":"done","outputPath":"output.mp4"}
 ```
 
-```javascript
-// adapter.js
-(function(){
-  const adapter = {
-    getDurationMs: () => 2000,
-    renderFrame(frameIndex, fps) {
-      const progress = frameIndex / (fps * 2); // 2 second duration
-      document.getElementById('box').style.left = (progress * 500) + 'px';
-    }
-  };
-  window.__RenderDOM__ = { adapter };
-})();
-```
+`encode-progress.percent` is computed when an expected duration is known (the orchestrator provides it).
 
-```bash
-renderdom render \
-  --adapter adapter.js \
-  --html scene.html \
-  --fps 30 \
-  -o animation.mp4
-```
-
-### With Audio
-
-```bash
-renderdom render \
-  --adapter adapter.js \
-  --html scene.html \
-  --audio background-music.mp3 \
-  --fps 30 \
-  -o video-with-audio.mp4
-```
-
-### High Quality Render
-
-```bash
-renderdom render \
-  --adapter adapter.js \
-  --html scene.html \
-  --width 3840 --height 2160 \
-  --fps 60 \
-  --codec h264 --crf 12 --preset slow \
-  --pixfmt yuv420p \
-  -o high-quality.mp4
-```
-
-## Architecture
-
-RenderDOM follows a modular architecture:
-
-- **Orchestrator**: Coordinates the rendering pipeline
-- **Browser Provider**: Manages Playwright browser instances  
-- **Page Bridge**: Injects adapters and calls frame functions
-- **Capture**: Takes screenshots of rendered frames
-- **FFmpeg Encoder**: Pipes images to FFmpeg for video encoding
-- **Progress Bus**: Emits real-time progress events
+---
 
 ## Troubleshooting
 
-### "page.waitForFunction: Timeout exceeded"
+* **Adapter not found / not registering**
+  Ensure your file exists and sets `window.__RenderDOM__.adapter`. The CLI inlines `--html` or loads `--page-url`, injects the adapter code via `page.evaluate`, and waits until the adapter is present.
 
-This usually means the adapter isn't loading properly:
+* **Timeouts** (e.g., "Timeout: renderFrame(...) after 15000ms")
+  Long per‑frame work can exceed `frameTimeoutMs` (default 15000). Optimize your adapter, reduce concurrency, or raise the timeout via the API.
 
-1. Check that your adapter file exists and is readable
-2. Verify the adapter exports `window.__RenderDOM__.adapter`
-3. Make sure your HTML page loads without errors
-4. Try increasing the timeout or reducing concurrency
+* **FFmpeg not found**
+  Confirm `ffmpeg -version` works and is on PATH. The encoder is spawned as `ffmpeg` with `image2pipe`.
 
-### FFmpeg not found
+* **Crashes or OOM under load**
+  Lower `--concurrency`, try `--preset veryfast`, or switch to `--image-format jpeg --image-quality 85` to reduce pipe size. You can also pass Chromium flags like `--max-old-space-size=4096`.
 
-Install FFmpeg and ensure it's in your PATH:
+* **Need visual diffs/tests**
+  Use `--debug-frames-dir` to capture PNGs and compare them to a golden baseline (see @tests/golden and @tests/golden.spec.ts).
 
-```bash
-which ffmpeg  # Should return a path
-ffmpeg -version  # Should show version info
-```
-
-### Poor performance
-
-- Reduce `--concurrency` if experiencing crashes
-- Use `--preset veryfast` for faster encoding
-- Try `--image-format jpeg` with `--image-quality 85` for smaller pipes
-- Profile your adapter code for performance bottlenecks
-
-### Memory issues
-
-- Lower concurrency (`--concurrency 1` or `--concurrency 2`)
-- Use shorter duration renders for testing
-- Add `--chromium-flag=--max-old-space-size=4096` for more memory
+---
 
 ## Roadmap
 
-- **v0.2**: Retry logic for failed frames and checksum validation
-- **v0.3**: Disk-based frame caching mode for debugging
-- **v0.4**: Audio mixing improvements (multiple tracks, offsets, fades)
-- **v0.5**: Browser pool integration for cloud rendering
-- **v1.0**: Virtual time driver for CSS/RAF animations
+* v0.2: Retry logic for failed frames and checksums
+* v0.3: Disk‑based frame cache (debugging)
+* v0.4: Audio mixing (multi‑track, offsets, fades)
+* v0.5: Browser pool for cloud workloads
+* v1.0: Virtual‑time driver for CSS/RAF animations
+  (Adapted from the existing roadmap and kept as guidance.)
 
-## License
-
-MIT
+---
 
 ## Contributing
 
-Issues and pull requests welcome! Please ensure tests pass:
+PRs and issues welcome. Run tests locally:
 
 ```bash
 npm test
 npm run build
 ```
+
+The repo includes smoke, CLI, encoder, page‑bridge, progress, and golden‑frame tests under @tests/*.
+
+---
+
+## License
+
+MIT (see @LICENSE).
+
+---
+
+### Notes on this revision
+
+* Clarified **effective defaults** from the code (e.g., `disableCssAnimations` defaults to **true** in config/orchestrator even though the CLI help text says "default: false").
+* Documented the **`cancel()`** API and **inclusive `endFrame`** behavior.
+* Linked concrete examples and testing flows in **@examples/** and **@tests/**.
+
+If you'd like, I can also convert this into a PR‑ready markdown file staged to replace @README.md.

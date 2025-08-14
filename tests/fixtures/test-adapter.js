@@ -1,4 +1,9 @@
 (function(){
+  // Deterministic test adapter following RenderDOM contract:
+  // - renderFrame(fi, fps) sets exact state at t = fi/fps
+  // - No reliance on Date.now() or ambient timelines  
+  // - Pure mathematical computation for bouncing ball animation
+  
   const DURATION_MS = 1000; // 1 second for faster tests
   
   const adapter = {

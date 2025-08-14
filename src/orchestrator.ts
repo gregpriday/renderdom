@@ -5,7 +5,7 @@ import PQueue from 'p-queue';
 import type { InternalConfig } from './config.js';
 import { ProgressBus } from './progress.js';
 import { PlaywrightProvider } from './browser/provider.js';
-import { injectAdapter, callRenderFrame, getDurationMs, ensureAssets } from './browser/page-bridge.js';
+import { injectAdapter, callRenderFrame, getDurationMs, ensureAssets, freezeCssAnimations, waitForStableFrame } from './browser/page-bridge.js';
 import { captureFrameBuffer } from './capture.js';
 import { spawnFfmpeg } from './encode/ffmpeg.js';
 
@@ -28,6 +28,12 @@ export function orchestrate(config: any, verbose: boolean) {
       } else {
         await p.setContent('<!doctype html><html><head><meta charset="utf-8"></head><body></body></html>');
       }
+      
+      // Freeze CSS animations for determinism (default: true)
+      if (config.disableCssAnimations ?? true) {
+        await freezeCssAnimations(p);
+      }
+      
       await injectAdapter(p, config.adapterPath);
       await ensureAssets(p);
       // Wait for fonts to be ready
@@ -72,16 +78,26 @@ export function orchestrate(config: any, verbose: boolean) {
     let done = 0;
     const queue = new PQueue({ concurrency });
 
+    const withTimeout = <T>(p: Promise<T>, ms: number, label: string) =>
+      Promise.race([p, new Promise<never>((_, rej) => setTimeout(() => rej(new Error(`Timeout: ${label} after ${ms}ms`)), ms))]);
+
     for (const [idx, frame] of frameIndices.entries()) {
       queue.add(async () => {
         const worker = idx % pages.length; // simple round‑robin
         const page = pages[worker];
-        await callRenderFrame(page, frame, config.fps);
-        const buf = await captureFrameBuffer(page, config.imageFormat, config.imageQuality);
+        const timeout = config.frameTimeoutMs ?? 15000;
+        await withTimeout(callRenderFrame(page, frame, config.fps), timeout, `renderFrame(${frame})`);
+        await withTimeout(
+          waitForStableFrame(page, { extraRafs: 1, waitFonts: true, waitImages: false }),
+          timeout,
+          `stability(${frame})`
+        );
+        const buf = await withTimeout(captureFrameBuffer(page, config.imageFormat, config.imageQuality), timeout, `screenshot(${frame})`);
         
         if (config.debugFramesDir) {
           // Write frame to disk
-          const framePath = path.join(config.debugFramesDir, `${frame.toString().padStart(6, '0')}.png`);
+          const ext = config.imageFormat === 'jpeg' ? 'jpg' : 'png';
+          const framePath = path.join(config.debugFramesDir, `${frame.toString().padStart(6, '0')}.${ext}`);
           await fs.writeFile(framePath, buf);
         } else if (ff) {
           // Write to FFmpeg

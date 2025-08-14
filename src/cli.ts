@@ -31,6 +31,8 @@ program.command('render')
   .option('--page-url <url>', 'page URL')
   .option('--html <path>', 'path to HTML file to inline')
   .option('--chromium-flag <flag>', 'repeatable chromium flag', (v, acc: string[]) => (acc ? acc.concat(v) : [v]))
+  .option('--disable-css-animations', 'disable CSS animations/transitions for determinism (default: false)')
+  .option('--debug-frames-dir <path>', 'write frames to a directory instead of encoding')
   .option('--verbose', 'emit JSONL progress to stdout', false)
   .action(async (opts) => {
     const html = opts.html ? await fs.readFile(path.resolve(opts.html), 'utf8') : undefined;
@@ -44,7 +46,12 @@ program.command('render')
       adapterPath: path.resolve(opts.adapter), outputPath: path.resolve(opts.out)
     });
 
-    const { events, promise } = renderDOM({ ...parsed, verbose: !!opts.verbose });
+    const { events, promise } = renderDOM({ 
+      ...parsed, 
+      verbose: !!opts.verbose, 
+      debugFramesDir: opts.debugFramesDir ?? process.env.RENDERDOM_DEBUG_FRAMES_DIR,
+      disableCssAnimations: opts.disableCssAnimations ?? parsed.disableCssAnimations
+    });
 
     events.on('error', (e: any) => console.error(e.message));
     try {

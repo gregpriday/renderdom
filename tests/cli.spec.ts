@@ -167,9 +167,10 @@ describe('CLI Contract Tests', () => {
       '--height', '90',
       '--fps', '10',
       '--end', '2',
+      '--debug-frames-dir', framesDir,
       // No --verbose flag
       '-o', path.join(tempDir, 'dummy.mp4')
-    ], { env: { ...process.env, debugFramesDir: framesDir } });
+    ]);
 
     expect(result.exitCode).toBe(0);
     

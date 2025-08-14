@@ -5,6 +5,8 @@ export interface SceneAdapter {
   renderFrame(frameIndex: number, fps: number): Promise<void> | void;
   /** optional: prefetch fonts/images/etc. */
   ensureAssets?(): Promise<void> | void;
+  /** optional: post-frame hook (e.g., canvas.commit(), flush caches) */
+  afterFrame?(): Promise<void> | void;
 }
 
 export interface RenderConfig {
@@ -38,6 +40,8 @@ export interface RenderConfig {
   verbose?: boolean;
   /** debug: write frames to directory instead of encoding to video */
   debugFramesDir?: string;
+  /** disable CSS animations/transitions for determinism (default: true) */
+  disableCssAnimations?: boolean;
 }
 
 export interface EncodeResult { outputPath: string; }

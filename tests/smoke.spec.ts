@@ -3,11 +3,9 @@ import { renderDOM } from '../src/index.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import tmp from 'tmp';
+import { hasFfmpeg } from './helpers/has-ffmpeg.js';
 
-// Minimal smoke test, skips if ffmpeg not in PATH
-function hasFfmpeg() {
-  return !!process.env.CI || process.env.PATH?.includes('ffmpeg');
-}
+const skipIfNoFfmpeg = hasFfmpeg() ? it : it.skip;
 
 describe('renderdom smoke', () => {
   let tempDir: string;
@@ -23,7 +21,7 @@ describe('renderdom smoke', () => {
     cleanup();
   });
 
-  it('renders a short video', async () => {
+  skipIfNoFfmpeg('renders a short video', async () => {
     const out = path.join(tempDir, 'out.mp4');
     const adapterPath = path.resolve('examples/basic-scene/adapter.js');
     const html = await fs.readFile(path.resolve('examples/basic-scene/index.html'), 'utf8');

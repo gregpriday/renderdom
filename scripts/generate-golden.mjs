@@ -5,9 +5,8 @@ import path from 'node:path';
 
 console.log('Generating golden frames...');
 
-const adapterPath = path.resolve('examples/basic-scene/adapter.js');
-const html = await fs.readFile(path.resolve('examples/basic-scene/index.html'), 'utf8');
-const goldenDir = path.resolve('tests/golden/basic-scene');
+const adapterPath = path.resolve('tests/fixtures/test-adapter.js');
+const goldenDir = path.resolve('tests/golden/test-adapter');
 
 // Clean existing golden frames
 try {
@@ -20,7 +19,7 @@ const config = {
   fps: 30,
   endFrame: 19, // 20 frames (first ~0.67 seconds)
   concurrency: 1,
-  html,
+  html: '<html><body style="margin:0;"></body></html>',
   adapterPath,
   outputPath: 'dummy.mp4', // unused
   debugFramesDir: goldenDir,

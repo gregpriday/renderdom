@@ -20,8 +20,12 @@ export const ConfigSchema = z.object({
   frameTimeoutMs: z.number().int().positive().default(15000),
   verbose: z.boolean().optional(),
   debugFramesDir: z.string().optional(),
+  disableCssAnimations: z.boolean().default(true),
   adapterPath: z.string(),
   outputPath: z.string()
-});
+}).refine(
+  (d) => d.endFrame === undefined || d.startFrame <= d.endFrame,
+  { message: 'endFrame must be >= startFrame', path: ['endFrame'] }
+);
 
 export type InternalConfig = z.infer<typeof ConfigSchema> & { totalFrames: number };
