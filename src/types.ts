@@ -1,3 +1,5 @@
+export type AudioMode = 'shortest' | 'pad-video';
+
 export interface SceneAdapter {
   /** total duration in milliseconds */
   getDurationMs(): number;
@@ -28,6 +30,10 @@ export interface RenderConfig {
   imageQuality?: number;
   /** optional audio file to merge */
   audioPath?: string | null;
+  /** audio vs. video duration handling */
+  audioMode?: AudioMode;
+  /** audio codec override */
+  audioCodec?: 'auto' | 'aac' | 'libopus' | 'pcm_s16le' | 'copy';
   /** headless chromium flags */
   chromiumFlags?: string[];
   /** custom page URL, default about:blank with inline HTML */

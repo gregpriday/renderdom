@@ -14,6 +14,8 @@ export const ConfigSchema = z.object({
   imageFormat: z.enum(['png', 'jpeg']).default('png'),
   imageQuality: z.number().int().min(0).max(100).default(92),
   audioPath: z.string().optional(),
+  audioMode: z.enum(['shortest', 'pad-video']).default('shortest'),
+  audioCodec: z.enum(['auto', 'aac', 'libopus', 'pcm_s16le', 'copy']).default('auto'),
   chromiumFlags: z.array(z.string()).default([]),
   pageUrl: z.string().optional(),
   html: z.string().optional(),

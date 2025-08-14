@@ -188,4 +188,144 @@ describe('FFmpeg encoder', () => {
       percent: 50
     });
   });
+
+  it('should use pad-video mode and omit -shortest', async () => {
+    const { execa } = vi.mocked(await import('execa'));
+    const mockProc = {
+      stdin: { write: vi.fn(), end: vi.fn() },
+      stdout: { on: vi.fn() }
+    };
+    execa.mockReturnValue(mockProc as any);
+
+    spawnFfmpeg({
+      fps: 30,
+      width: 1920,
+      height: 1080,
+      codec: 'h264',
+      crf: 18,
+      preset: 'medium',
+      pixelFormat: 'yuv420p',
+      imageFormat: 'png',
+      audioPath: './audio.mp3',
+      audioMode: 'pad-video',
+      videoPadSeconds: 2.5,
+      outputPath: './out.mp4'
+    });
+
+    const args = execa.mock.calls[0][1];
+    expect(args).toContain('-i');
+    expect(args).toContain('./audio.mp3');
+    expect(args).not.toContain('-shortest');
+    expect(args).toContain('-vf');
+    expect(args).toContain('tpad=stop_mode=clone:stop_duration=2.500');
+  });
+
+  it('should use shortest mode by default', async () => {
+    const { execa } = vi.mocked(await import('execa'));
+    const mockProc = {
+      stdin: { write: vi.fn(), end: vi.fn() },
+      stdout: { on: vi.fn() }
+    };
+    execa.mockReturnValue(mockProc as any);
+
+    spawnFfmpeg({
+      fps: 30,
+      width: 1920,
+      height: 1080,
+      codec: 'h264',
+      crf: 18,
+      preset: 'medium',
+      pixelFormat: 'yuv420p',
+      imageFormat: 'png',
+      audioPath: './audio.mp3',
+      audioMode: 'shortest',
+      outputPath: './out.mp4'
+    });
+
+    const args = execa.mock.calls[0][1];
+    expect(args).toContain('-shortest');
+    expect(args).not.toContain('-vf');
+  });
+
+  it('should select appropriate audio codec based on video codec', async () => {
+    const { execa } = vi.mocked(await import('execa'));
+    const mockProc = {
+      stdin: { write: vi.fn(), end: vi.fn() },
+      stdout: { on: vi.fn() }
+    };
+    execa.mockReturnValue(mockProc as any);
+
+    // Test h264 -> aac
+    spawnFfmpeg({
+      fps: 30,
+      width: 1920,
+      height: 1080,
+      codec: 'h264',
+      crf: 18,
+      preset: 'medium',
+      pixelFormat: 'yuv420p',
+      imageFormat: 'png',
+      audioPath: './audio.mp3',
+      audioCodec: 'auto',
+      outputPath: './out.mp4'
+    });
+
+    let args = execa.mock.calls[0][1];
+    expect(args).toContain('-c:a');
+    expect(args).toContain('aac');
+    expect(args).toContain('-b:a');
+    expect(args).toContain('192k');
+
+    vi.clearAllMocks();
+    execa.mockReturnValue(mockProc as any);
+
+    // Test vp9 -> libopus
+    spawnFfmpeg({
+      fps: 30,
+      width: 1920,
+      height: 1080,
+      codec: 'vp9',
+      crf: 30,
+      preset: 'medium',
+      pixelFormat: 'yuv420p',
+      imageFormat: 'png',
+      audioPath: './audio.mp3',
+      audioCodec: 'auto',
+      outputPath: './out.webm'
+    });
+
+    args = execa.mock.calls[0][1];
+    expect(args).toContain('-c:a');
+    expect(args).toContain('libopus');
+    expect(args).toContain('-b:a');
+    expect(args).toContain('128k');
+  });
+
+  it('should use explicit audio codec when specified', async () => {
+    const { execa } = vi.mocked(await import('execa'));
+    const mockProc = {
+      stdin: { write: vi.fn(), end: vi.fn() },
+      stdout: { on: vi.fn() }
+    };
+    execa.mockReturnValue(mockProc as any);
+
+    spawnFfmpeg({
+      fps: 30,
+      width: 1920,
+      height: 1080,
+      codec: 'h264',
+      crf: 18,
+      preset: 'medium',
+      pixelFormat: 'yuv420p',
+      imageFormat: 'png',
+      audioPath: './audio.mp3',
+      audioCodec: 'copy',
+      outputPath: './out.mp4'
+    });
+
+    const args = execa.mock.calls[0][1];
+    expect(args).toContain('-c:a');
+    expect(args).toContain('copy');
+    expect(args).not.toContain('-b:a');
+  });
 });

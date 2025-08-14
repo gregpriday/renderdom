@@ -10,6 +10,9 @@ export interface FfmpegOptions {
   imageFormat: 'png' | 'jpeg';
   outputPath: string;
   expectedDurationMs?: number;
+  audioMode?: 'shortest' | 'pad-video';
+  videoPadSeconds?: number;
+  audioCodec?: 'auto' | 'aac' | 'libopus' | 'pcm_s16le' | 'copy';
 }
 
 export interface FfmpegSession {
@@ -26,8 +29,21 @@ export function spawnFfmpeg(opts: FfmpegOptions): FfmpegSession {
     '-vcodec', opts.imageFormat === 'png' ? 'png' : 'mjpeg',
     '-i', 'pipe:0',
   ];
-  if (opts.audioPath) args.push('-i', opts.audioPath, '-shortest');
 
+  if (opts.audioPath) {
+    args.push('-i', opts.audioPath);
+    if (opts.audioMode !== 'pad-video') {
+      // default (shortest) – current behavior
+      args.push('-shortest');
+    }
+  }
+
+  // Pad the video tail by freezing the last frame, if requested
+  if ((opts.videoPadSeconds ?? 0) > 0) {
+    args.push('-vf', `tpad=stop_mode=clone:stop_duration=${opts.videoPadSeconds!.toFixed(3)}`);
+  }
+
+  // Video codec (unchanged)
   switch (opts.codec) {
     case 'h264':
       args.push('-c:v', 'libx264', '-crf', String(opts.crf), '-preset', opts.preset);
@@ -38,6 +54,23 @@ export function spawnFfmpeg(opts: FfmpegOptions): FfmpegSession {
     case 'prores':
       args.push('-c:v', 'prores_ks', '-profile:v', '3');
       break;
+  }
+
+  // Audio codec (new, but safe defaults)
+  if (opts.audioPath) {
+    const pick = (opts.audioCodec && opts.audioCodec !== 'auto')
+      ? opts.audioCodec
+      : (opts.codec === 'vp9' ? 'libopus'
+         : opts.codec === 'prores' ? 'pcm_s16le'
+         : 'aac');
+    if (pick !== 'copy') {
+      args.push('-c:a', pick);
+      if (pick === 'aac' || pick === 'libopus') {
+        args.push('-b:a', pick === 'aac' ? '192k' : '128k', '-ar', '48000', '-ac', '2');
+      }
+    } else {
+      args.push('-c:a', 'copy');
+    }
   }
 
   args.push('-pix_fmt', opts.pixelFormat, '-r', String(opts.fps));

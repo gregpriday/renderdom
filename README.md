@@ -52,6 +52,7 @@ renderdom render \
   --width 1920 --height 1080 --fps 60 \
   --codec h264 --crf 18 --preset medium \
   --pixfmt yuv420p \
+  --audio ./music.mp3 --audio-mode pad-video \
   --verbose \
   -o output.mp4
 ```
@@ -69,6 +70,8 @@ const { events, promise, cancel } = renderDOM({
   width: 1920,
   height: 1080,
   fps: 60,
+  audioPath: './track.wav',
+  audioMode: 'pad-video',
   outputPath: 'output.mp4',
   verbose: true
 });
@@ -146,7 +149,11 @@ Command: `renderdom render` (see @src/cli.ts)
 * `--pixfmt <p>` `yuv420p|yuva420p` (default **yuv420p**)
 * `--image-format <f>` `png|jpeg` (default **png**)
 * `--image-quality <n>` JPEG quality 0–100 (default **92**)
-* `--audio <path>` Optional audio file to mux (duration is truncated to the shorter stream with `-shortest`).
+* `--audio <path>` Optional audio file (MP3/WAV, etc.)
+* `--audio-mode shortest|pad-video` 
+  *shortest* (default): truncate to the shorter stream.
+  *pad-video*: if audio is longer, freeze the last video frame to match audio.
+* `--audio-codec auto|aac|libopus|pcm_s16le|copy` (optional)
 
 **Performance**
 
@@ -180,6 +187,8 @@ Command: `renderdom render` (see @src/cli.ts)
 * `codec` **'h264'**, `crf` **18**, `preset` **'medium'**, `pixelFormat` **'yuv420p'**
 * `imageFormat` **'png'**, `imageQuality` **92**
 * `audioPath` optional
+* `audioMode` **'shortest'** | `'pad-video'`
+* `audioCodec` **'auto'** | `'aac'` | `'libopus'` | `'pcm_s16le'` | `'copy'`
 * `chromiumFlags` `string[]` (default `[]`)
 * `pageUrl` optional, `html` optional (inline HTML string)
 * `frameTimeoutMs` **15000**

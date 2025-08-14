@@ -8,6 +8,7 @@ import { PlaywrightProvider } from './browser/provider.js';
 import { injectAdapter, callRenderFrame, getDurationMs, ensureAssets, freezeCssAnimations, waitForStableFrame } from './browser/page-bridge.js';
 import { captureFrameBuffer } from './capture.js';
 import { spawnFfmpeg } from './encode/ffmpeg.js';
+import { probeAudioDurationMs } from './encode/probe.js';
 
 export function orchestrate(config: any, verbose: boolean) {
   const progress = new ProgressBus(verbose);
@@ -50,6 +51,24 @@ export function orchestrate(config: any, verbose: boolean) {
 
     const frameIndices = Array.from({ length: totalFrames }, (_, i) => (config.startFrame ?? 0) + i);
 
+    // Calculate video duration and audio padding
+    const videoDurationMs = (frameIndices.length / config.fps) * 1000;
+    let videoPadSeconds = 0;
+    let expectedDurationMs = videoDurationMs;
+
+    if (config.audioPath && config.audioMode === 'pad-video') {
+      try {
+        const audioMs = await probeAudioDurationMs(config.audioPath);
+        if (audioMs > videoDurationMs) {
+          videoPadSeconds = (audioMs - videoDurationMs) / 1000;
+          expectedDurationMs = audioMs;
+        }
+      } catch {
+        // If probe fails, fall back gracefully to current behavior
+        // (keep expectedDurationMs = videoDurationMs)
+      }
+    }
+
     // Debug frames mode: write PNGs to disk
     if (config.debugFramesDir) {
       await fs.mkdir(config.debugFramesDir, { recursive: true });
@@ -65,9 +84,12 @@ export function orchestrate(config: any, verbose: boolean) {
       preset: config.preset,
       pixelFormat: config.pixelFormat,
       audioPath: config.audioPath,
+      audioMode: config.audioMode,
+      videoPadSeconds,
+      audioCodec: config.audioCodec,
       imageFormat: config.imageFormat,
       outputPath: config.outputPath,
-      expectedDurationMs: (frameIndices.length / config.fps) * 1000
+      expectedDurationMs
     });
 
     if (ff) {

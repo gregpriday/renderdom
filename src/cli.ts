@@ -28,6 +28,8 @@ program.command('render')
   .option('--image-format <f>', 'png|jpeg')
   .option('--image-quality <n>', 'jpeg quality 0..100', (v) => parseInt(v, 10))
   .option('--audio <path>', 'audio file')
+  .option('--audio-mode <mode>', 'audio vs. video duration: shortest|pad-video', 'shortest')
+  .option('--audio-codec <c>', 'auto|aac|libopus|pcm_s16le|copy', 'auto')
   .option('--page-url <url>', 'page URL')
   .option('--html <path>', 'path to HTML file to inline')
   .option('--chromium-flag <flag>', 'repeatable chromium flag', (v, acc: string[]) => (acc ? acc.concat(v) : [v]))
@@ -42,7 +44,8 @@ program.command('render')
       startFrame: opts.start, endFrame: opts.end, concurrency: opts.concurrency,
       codec: opts.codec, crf: opts.crf, preset: opts.preset, pixelFormat: opts.pixfmt,
       imageFormat: opts.imageFormat, imageQuality: opts.imageQuality,
-      audioPath: opts.audio, pageUrl: opts.pageUrl, html, chromiumFlags: opts.chromiumFlag || [],
+      audioPath: opts.audio, audioMode: opts.audioMode, audioCodec: opts.audioCodec,
+      pageUrl: opts.pageUrl, html, chromiumFlags: opts.chromiumFlag || [],
       adapterPath: path.resolve(opts.adapter), outputPath: path.resolve(opts.out)
     });
 

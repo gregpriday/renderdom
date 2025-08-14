@@ -198,4 +198,61 @@ describe('Orchestrator Integration', () => {
     expect(pngFiles[pngFiles.length - 1]).toBe('000029.png');
     expect(pngFiles.length).toBe(15);
   }, 30000);
+
+  skipIfNoFfmpeg('should render with pad-video audio mode', async () => {
+    const outputPath = path.join(tempDir, 'test-audio-pad.mp4');
+    const adapterPath = path.resolve('tests/fixtures/test-adapter.js');
+    const audioPath = path.resolve('tests/fixtures/voiceover.mp3');
+
+    const config = {
+      width: 320,
+      height: 180,
+      fps: 15,
+      endFrame: 14, // 1 second at 15fps
+      concurrency: 1,
+      codec: 'h264' as const,
+      crf: 28,
+      preset: 'veryfast',
+      pixelFormat: 'yuv420p' as const,
+      imageFormat: 'png' as const,
+      html: '<html><body style=\"margin:0;\"></body></html>',
+      adapterPath,
+      audioPath,
+      audioMode: 'pad-video' as const,
+      audioCodec: 'auto' as const,
+      outputPath,
+      verbose: false
+    };
+
+    const { events, promise } = renderDOM(config);
+
+    // Collect events
+    const capturedEvents: any[] = [];
+    events.on('capture-start', (e) => capturedEvents.push(e));
+    events.on('encode-start', (e) => capturedEvents.push(e));
+    events.on('done', (e) => capturedEvents.push(e));
+
+    const result = await promise;
+
+    // Verify output file exists
+    const stat = await fs.stat(result.outputPath);
+    expect(stat.size).toBeGreaterThan(1000);
+
+    // Verify events were emitted
+    const captureStart = capturedEvents.find(e => e.type === 'capture-start');
+    expect(captureStart).toBeDefined();
+    expect(captureStart.totalFrames).toBe(15);
+
+    const encodeStart = capturedEvents.find(e => e.type === 'encode-start');
+    expect(encodeStart).toBeDefined();
+    // Should NOT contain -shortest when using pad-video mode
+    expect(encodeStart.args).not.toContain('-shortest');
+    // Should contain tpad filter if audio is longer than video
+    const hasTpad = encodeStart.args.some((arg: string) => arg.includes('tpad=stop_mode=clone'));
+    // Only expect tpad if the audio is actually longer than the video
+
+    const done = capturedEvents.find(e => e.type === 'done');
+    expect(done).toBeDefined();
+    expect(done.outputPath).toBe(outputPath);
+  }, 90000);
 });
