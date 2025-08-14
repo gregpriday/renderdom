@@ -9,13 +9,20 @@ import { injectAdapter, callRenderFrame, getDurationMs, ensureAssets, freezeCssA
 import { captureFrameBuffer } from './capture.js';
 import { spawnFfmpeg } from './encode/ffmpeg.js';
 import { probeAudioDurationMs } from './encode/probe.js';
+import { validateFfmpegRequirements } from './utils/ffmpeg-check.js';
 
 export function orchestrate(config: any, verbose: boolean, abortSignal?: AbortSignal) {
   const progress = new ProgressBus(verbose);
   const promise = (async () => {
+    // Check FFmpeg availability early, before launching browsers
+    const needsFFprobe = !!config.audioPath && config.audioMode === 'pad-video';
+    if (!config.debugFramesDir) {
+      await validateFfmpegRequirements(needsFFprobe);
+    }
+    
     const concurrency = config.concurrency ?? Math.max(1, Math.floor(os.cpus().length / 2));
     const provider = new PlaywrightProvider();
-    await provider.launch(config.chromiumFlags);
+    await provider.launch(config.chromiumFlags, config.disableChromiumSandbox);
 
     const pages = await Promise.all(Array.from({ length: concurrency }, () => provider.newPage(config.width, config.height)));
 
@@ -50,7 +57,7 @@ export function orchestrate(config: any, verbose: boolean, abortSignal?: AbortSi
       }
       
       await withBootstrapTimeout(injectAdapter(p, config.adapterPath), bootstrapTimeout, 'adapter injection');
-      await withBootstrapTimeout(ensureAssets(p), bootstrapTimeout, 'ensureAssets()');
+      // Note: injectAdapter already calls ensureAssets, so no need to call it again
       // Wait for fonts to be ready
       await withBootstrapTimeout(p.evaluate(() => document.fonts.ready), bootstrapTimeout, 'fonts ready');
     }));
@@ -94,8 +101,11 @@ export function orchestrate(config: any, verbose: boolean, abortSignal?: AbortSi
           videoPadSeconds = (audioMs - videoDurationMs) / 1000;
           expectedDurationMs = audioMs;
         }
-      } catch {
-        // If probe fails, fall back gracefully to current behavior
+      } catch (error: any) {
+        // Log specific audio probe failures for better debugging
+        console.warn(`Audio probe failed for ${config.audioPath}: ${error.message}`);
+        console.warn('Falling back to video-only duration. Audio may be truncated or not synchronized.');
+        // Fall back gracefully to current behavior
         // (keep expectedDurationMs = videoDurationMs)
       }
     }
@@ -178,8 +188,10 @@ export function orchestrate(config: any, verbose: boolean, abortSignal?: AbortSi
       });
     };
 
+    const frameTasks: Promise<void>[] = [];
+    
     for (const [idx, frame] of frameIndices.entries()) {
-      queue.add(async () => {
+      const task = queue.add(async () => {
         // Check if cancelled before processing frame
         if (abortSignal?.aborted) {
           throw new Error('Render operation was cancelled');
@@ -188,30 +200,41 @@ export function orchestrate(config: any, verbose: boolean, abortSignal?: AbortSi
         const worker = idx % pages.length; // simple round‑robin
         const page = pages[worker];
         const timeout = config.frameTimeoutMs ?? 15000;
-        await withTimeout(callRenderFrame(page, frame, config.fps), timeout, `renderFrame(${frame})`);
-        await withTimeout(
-          waitForStableFrame(page, { extraRafs: 1, waitFonts: true, waitImages: false }),
-          timeout,
-          `stability(${frame})`
-        );
-        const buf = await withTimeout(captureFrameBuffer(page, config.imageFormat, config.imageQuality), timeout, `screenshot(${frame})`);
         
-        // Check again before writing
-        if (abortSignal?.aborted) {
-          throw new Error('Render operation was cancelled');
+        try {
+          await withTimeout(callRenderFrame(page, frame, config.fps), timeout, `renderFrame(${frame})`);
+          await withTimeout(
+            waitForStableFrame(page, { extraRafs: 1, waitFonts: true, waitImages: false }),
+            timeout,
+            `stability(${frame})`
+          );
+          const buf = await withTimeout(captureFrameBuffer(page, config.imageFormat, config.imageQuality), timeout, `screenshot(${frame})`);
+          
+          // Check again before writing
+          if (abortSignal?.aborted) {
+            throw new Error('Render operation was cancelled');
+          }
+          
+          // Buffer frame and flush in order
+          pending.set(frame, buf);
+          await flushInOrder();
+          
+          done++;
+          progress.emit({ type: 'capture-progress', done, total: totalFrames, percent: (done / totalFrames) * 100, frame });
+        } catch (error) {
+          // Add frame context to errors
+          const frameError = new Error(`Frame ${frame} failed: ${(error as Error).message}`);
+          frameError.stack = (error as Error).stack;
+          throw frameError;
         }
-        
-        // Buffer frame and flush in order
-        pending.set(frame, buf);
-        await flushInOrder();
-        
-        done++;
-        progress.emit({ type: 'capture-progress', done, total: totalFrames, percent: (done / totalFrames) * 100, frame });
       });
+      
+      frameTasks.push(task);
     }
 
     try {
-      await queue.onIdle();
+      // Wait for all frame tasks to complete, which will propagate any errors
+      await Promise.all(frameTasks);
       
       if (ff) {
         ff.stdin.end();
@@ -228,6 +251,7 @@ export function orchestrate(config: any, verbose: boolean, abortSignal?: AbortSi
         if (ff) {
           try {
             ff.stdin.destroy();
+            ff.kill(); // Terminate FFmpeg process
           } catch {}
         }
         

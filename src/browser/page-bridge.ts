@@ -3,7 +3,14 @@ import fs from 'node:fs/promises';
 
 export async function injectAdapter(page: Page, adapterPath: string) {
   const adapterCode = await fs.readFile(adapterPath, 'utf8');
-  await page.evaluate(adapterCode);
+  
+  // Use script tag injection instead of eval for better module support and security
+  await page.evaluate((code) => {
+    const script = document.createElement('script');
+    script.textContent = code;
+    document.head.appendChild(script);
+  }, adapterCode);
+  
   await page.waitForFunction(() => {
     // @ts-ignore
     return typeof window !== 'undefined' && !!(window as any).__RenderDOM__?.adapter;

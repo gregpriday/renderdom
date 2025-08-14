@@ -64,8 +64,22 @@ describe('Timeout and Error Propagation', () => {
     });
 
     it('should use default timeout when frameTimeoutMs not specified', async () => {
-      const slowAdapterPath = path.join(tempDir, 'slow-adapter.js');
-      await fs.writeFile(slowAdapterPath, badAdapters.slowRenderFrame);
+      // Create a custom slow adapter that's slower than the default timeout
+      const verySlowAdapterPath = path.join(tempDir, 'very-slow-adapter.js');
+      await fs.writeFile(verySlowAdapterPath, `
+(function(){
+  window.__RenderDOM__ = { 
+    adapter: {
+      getDurationMs() { return 1000; },
+      async renderFrame(frameIndex, fps) {
+        // Wait longer than default timeout (15000ms)
+        await new Promise(resolve => setTimeout(resolve, 16000));
+        document.body.innerHTML = '<div>Very slow frame ' + frameIndex + '</div>';
+      }
+    }
+  };
+})();
+      `);
 
       const config = {
         width: 160,
@@ -74,15 +88,16 @@ describe('Timeout and Error Propagation', () => {
         endFrame: 0,
         concurrency: 1,
         pixelFormat: 'yuv420p' as const,
-        // frameTimeoutMs not specified - should use default
+        // frameTimeoutMs not specified - should use default (15000ms)
         html: '<html><body></body></html>',
-        adapterPath: slowAdapterPath,
+        adapterPath: verySlowAdapterPath,
         outputPath: path.join(tempDir, 'slow.mp4'),
         verbose: false
       };
 
-      await expect(renderDOM(config).promise).rejects.toThrow(/timeout|command failed.*ffmpeg/i);
-    });
+      // Should timeout with default timeout (16s wait > 15s default timeout)
+      await expect(renderDOM(config).promise).rejects.toThrow(/timeout.*renderFrame\(0\).*15000ms/i);
+    }, 20000); // Give test 20s to complete
   });
 
   describe('Adapter Error Propagation', () => {

@@ -4,3 +4,4 @@ dist
 .vscode
 .DS_Store
 coverage
+/examples/basic-scene/out.mp4

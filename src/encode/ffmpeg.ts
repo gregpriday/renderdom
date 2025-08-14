@@ -19,6 +19,7 @@ export interface FfmpegSession {
   stdin: NodeJS.WritableStream;
   events: EventEmitter<{ type: 'encode-progress'; outTimeMs: number }>; // minimal
   wait: () => Promise<void>;
+  kill: () => void;
 }
 
 export function spawnFfmpeg(opts: FfmpegOptions): FfmpegSession {
@@ -100,9 +101,21 @@ export function spawnFfmpeg(opts: FfmpegOptions): FfmpegSession {
     }
   });
 
+  // Handle stderr to prevent buffer overflow and capture diagnostics
+  proc.stderr?.on('data', (chunk: Buffer) => {
+    // Log stderr in development or emit as events for debugging
+    const message = chunk.toString();
+    if (process.env.NODE_ENV === 'development' || process.env.RENDERDOM_DEBUG_FFMPEG) {
+      console.warn('[FFmpeg stderr]:', message.trim());
+    }
+    // Emit stderr events for potential debugging
+    events.emit('stderr', { type: 'stderr', message: message.trim() });
+  });
+
   return {
     stdin: proc.stdin!,
     events,
-    wait: async () => { await proc; }
+    wait: async () => { await proc; },
+    kill: () => proc.kill('SIGTERM')
   };
 }

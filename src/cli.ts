@@ -33,11 +33,23 @@ program.command('render')
   .option('--page-url <url>', 'page URL')
   .option('--html <path>', 'path to HTML file to inline')
   .option('--chromium-flag <flag>', 'repeatable chromium flag', (v, acc: string[]) => (acc ? acc.concat(v) : [v]))
-  .option('--disable-css-animations', 'disable CSS animations/transitions for determinism (default: true)')
+  .option('--disable-chromium-sandbox', 'disable Chromium sandbox for compatibility (default: true)', true)
+  .option('--enable-chromium-sandbox', 'enable Chromium sandbox for security (overrides --disable-chromium-sandbox)', false)
+  .option('--disable-css-animations', 'disable CSS animations/transitions for determinism (default: true)', true)
+  .option('--enable-css-animations', 'enable CSS animations/transitions (overrides --disable-css-animations)', false)
   .option('--debug-frames-dir <path>', 'write frames to a directory instead of encoding')
   .option('--verbose', 'emit JSONL progress to stdout', false)
   .action(async (opts) => {
-    const html = opts.html ? await fs.readFile(path.resolve(opts.html), 'utf8') : undefined;
+    let html: string | undefined;
+    if (opts.html) {
+      try {
+        html = await fs.readFile(path.resolve(opts.html), 'utf8');
+      } catch (error: any) {
+        console.error(`Failed to read HTML file: ${error.message}`);
+        process.exitCode = 1;
+        return;
+      }
+    }
 
     const parsed = ConfigSchema.parse({
       width: opts.width, height: opts.height, fps: opts.fps,
@@ -53,7 +65,8 @@ program.command('render')
       ...parsed, 
       verbose: !!opts.verbose, 
       debugFramesDir: opts.debugFramesDir ?? process.env.RENDERDOM_DEBUG_FRAMES_DIR,
-      disableCssAnimations: opts.disableCssAnimations ?? parsed.disableCssAnimations
+      disableCssAnimations: opts.enableCssAnimations ? false : (opts.disableCssAnimations ?? parsed.disableCssAnimations),
+      disableChromiumSandbox: opts.enableChromiumSandbox ? false : (opts.disableChromiumSandbox ?? parsed.disableChromiumSandbox)
     });
 
     events.on('error', (e: any) => console.error(e.message));
