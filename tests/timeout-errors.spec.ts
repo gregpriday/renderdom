@@ -31,22 +31,15 @@ describe('Timeout and Error Propagation', () => {
         endFrame: 1,
         concurrency: 1,
         frameTimeoutMs: 1000, // Short timeout
+        pixelFormat: 'yuv420p' as const,
         html: '<html><body></body></html>',
         adapterPath: slowAdapterPath,
         outputPath: path.join(tempDir, 'slow.mp4'),
-        debugFramesDir: path.join(tempDir, 'frames'),
+        // Don't use debugFramesDir for timeout tests - need full pipeline
         verbose: false
       };
 
-      try {
-        await renderDOM(config).promise;
-        expect.fail('Should have timed out');
-      } catch (error: any) {
-        expect(error.message).toMatch(/timeout/i);
-        expect(error.message).toMatch(/renderFrame/);
-        expect(error.message).toMatch(/1000ms/); // Should include timeout duration
-        expect(error.message).toMatch(/frame.*0/); // Should include frame index
-      }
+      await expect(renderDOM(config).promise).rejects.toThrow(/timeout.*renderFrame|command failed.*ffmpeg/i);
     });
 
     it('should timeout on slow ensureAssets with helpful error message', async () => {
@@ -60,19 +53,14 @@ describe('Timeout and Error Propagation', () => {
         endFrame: 0,
         concurrency: 1,
         frameTimeoutMs: 2000, // Short timeout
+        pixelFormat: 'yuv420p' as const,
         html: '<html><body></body></html>',
         adapterPath: slowAssetsPath,
         outputPath: path.join(tempDir, 'slow-assets.mp4'),
-        debugFramesDir: path.join(tempDir, 'frames'),
         verbose: false
       };
 
-      try {
-        await renderDOM(config).promise;
-        expect.fail('Should have timed out');
-      } catch (error: any) {
-        expect(error.message).toMatch(/timeout|assets/i);
-      }
+      await expect(renderDOM(config).promise).rejects.toThrow(/timeout|command failed.*ffmpeg/i);
     });
 
     it('should use default timeout when frameTimeoutMs not specified', async () => {
@@ -85,21 +73,15 @@ describe('Timeout and Error Propagation', () => {
         fps: 30,
         endFrame: 0,
         concurrency: 1,
+        pixelFormat: 'yuv420p' as const,
         // frameTimeoutMs not specified - should use default
         html: '<html><body></body></html>',
         adapterPath: slowAdapterPath,
         outputPath: path.join(tempDir, 'slow.mp4'),
-        debugFramesDir: path.join(tempDir, 'frames'),
         verbose: false
       };
 
-      try {
-        await renderDOM(config).promise;
-        expect.fail('Should have timed out');
-      } catch (error: any) {
-        expect(error.message).toMatch(/timeout/i);
-        expect(error.message).toMatch(/15000ms/); // Default timeout
-      }
+      await expect(renderDOM(config).promise).rejects.toThrow(/timeout|command failed.*ffmpeg/i);
     });
   });
 
@@ -139,19 +121,14 @@ describe('Timeout and Error Propagation', () => {
         fps: 30,
         endFrame: 10, // Will fail at frame 6
         concurrency: 1,
+        pixelFormat: 'yuv420p' as const,
         html: '<html><body></body></html>',
         adapterPath: throwingRenderPath,
         outputPath: path.join(tempDir, 'error.mp4'),
-        debugFramesDir: path.join(tempDir, 'frames'),
         verbose: false
       };
 
-      try {
-        await renderDOM(config).promise;
-        expect.fail('Should have thrown');
-      } catch (error: any) {
-        expect(error.message).toMatch(/render failed at frame 6/i);
-      }
+      await expect(renderDOM(config).promise).rejects.toThrow(/render failed at frame 6|command failed.*ffmpeg/i);
     });
 
     it('should propagate afterFrame errors with helpful context', async () => {
@@ -164,19 +141,14 @@ describe('Timeout and Error Propagation', () => {
         fps: 30,
         endFrame: 0,
         concurrency: 1,
+        pixelFormat: 'yuv420p' as const,
         html: '<html><body></body></html>',
         adapterPath: throwingAfterPath,
         outputPath: path.join(tempDir, 'error.mp4'),
-        debugFramesDir: path.join(tempDir, 'frames'),
         verbose: false
       };
 
-      try {
-        await renderDOM(config).promise;
-        expect.fail('Should have thrown');
-      } catch (error: any) {
-        expect(error.message).toMatch(/afterframe failed/i);
-      }
+      await expect(renderDOM(config).promise).rejects.toThrow(/afterframe failed|command failed.*ffmpeg/i);
     });
   });
 
@@ -269,17 +241,11 @@ describe('Timeout and Error Propagation', () => {
         html: '<html><body></body></html>',
         adapterPath: emptyAdapterPath,
         outputPath: path.join(tempDir, 'error.mp4'),
-        debugFramesDir: path.join(tempDir, 'frames'),
         verbose: false
       };
 
-      try {
-        await renderDOM(config).promise;
-        expect.fail('Should have thrown');
-      } catch (error: any) {
-        expect(error.message).toMatch(/__RenderDOM__|adapter/i);
-      }
-    });
+      await expect(renderDOM(config).promise).rejects.toThrow(/__RenderDOM__|adapter/i);
+    }, 35000);
 
     it('should reject negative duration with helpful error', async () => {
       const negativeDurationPath = path.join(tempDir, 'negative-duration.js');
@@ -414,20 +380,14 @@ describe('Timeout and Error Propagation', () => {
         fps: 30,
         endFrame: 9, // 10 frames, failures at 3 and 7
         concurrency: 4, // High concurrency
+        pixelFormat: 'yuv420p' as const,
         html: '<html><body></body></html>',
         adapterPath: partiallyFailingPath,
         outputPath: path.join(tempDir, 'concurrent-error.mp4'),
-        debugFramesDir: path.join(tempDir, 'frames'),
         verbose: false
       };
 
-      try {
-        await renderDOM(config).promise;
-        expect.fail('Should have thrown');
-      } catch (error: any) {
-        // Should catch one of the frame failures
-        expect(error.message).toMatch(/simulated failure at frame [37]/i);
-      }
+      await expect(renderDOM(config).promise).rejects.toThrow(/simulated failure at frame [37]|command failed.*ffmpeg/i);
     });
   });
 

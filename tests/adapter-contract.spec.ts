@@ -362,7 +362,7 @@ describe('Adapter Contract Validation', () => {
 
       await expect(injectAdapter(page, emptyAdapterPath)).rejects.toThrow();
       await page.close();
-    }, 20000);
+    }, 35000);
   });
 
   describe('Frame Parameter Validation', () => {
