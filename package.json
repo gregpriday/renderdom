@@ -19,12 +19,24 @@
     "dev": "tsx src/cli.ts",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:cov": "vitest run --coverage",
+    "update-golden": "node scripts/generate-golden.mjs",
     "lint": "eslint .",
     "format": "prettier -w .",
     "prepublishOnly": "npm run build"
   },
-  "files": ["dist"],
-  "keywords": ["render", "ffmpeg", "playwright", "video", "dom", "frames", "jsonl"],
+  "files": [
+    "dist"
+  ],
+  "keywords": [
+    "render",
+    "ffmpeg",
+    "playwright",
+    "video",
+    "dom",
+    "frames",
+    "jsonl"
+  ],
   "dependencies": {
     "commander": "^12.1.0",
     "eventemitter3": "^5.0.1",
@@ -39,8 +51,12 @@
     "@types/node": "^22.0.0",
     "@typescript-eslint/eslint-plugin": "^8.0.0",
     "@typescript-eslint/parser": "^8.0.0",
+    "@vitest/coverage-v8": "^2.1.9",
     "eslint": "^9.7.0",
+    "pixelmatch": "^7.1.0",
+    "pngjs": "^7.0.0",
     "prettier": "^3.3.3",
+    "tinyspy": "^4.0.3",
     "tsup": "^8.1.0",
     "tsx": "^4.16.0",
     "typescript": "^5.5.4",

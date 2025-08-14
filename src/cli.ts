@@ -44,7 +44,7 @@ program.command('render')
       adapterPath: path.resolve(opts.adapter), outputPath: path.resolve(opts.out)
     });
 
-    const { events, promise } = renderDOM(parsed as any);
+    const { events, promise } = renderDOM({ ...parsed, verbose: !!opts.verbose });
 
     events.on('error', (e: any) => console.error(e.message));
     try {

@@ -34,6 +34,10 @@ export interface RenderConfig {
   html?: string;
   /** timeout per frame (ms) */
   frameTimeoutMs?: number;
+  /** enable JSONL progress output */
+  verbose?: boolean;
+  /** debug: write frames to directory instead of encoding to video */
+  debugFramesDir?: string;
 }
 
 export interface EncodeResult { outputPath: string; }

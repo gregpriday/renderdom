@@ -9,6 +9,7 @@ export interface FfmpegOptions {
   audioPath?: string;
   imageFormat: 'png' | 'jpeg';
   outputPath: string;
+  expectedDurationMs?: number;
 }
 
 export interface FfmpegSession {
@@ -49,6 +50,9 @@ export function spawnFfmpeg(opts: FfmpegOptions): FfmpegSession {
 
   const proc = execa('ffmpeg', args, { stdin: 'pipe' });
   const events = new EventEmitter<any>();
+  
+  // encode-start event
+  setImmediate(() => events.emit('encode-start', { type: 'encode-start', args }));
 
   proc.stdout?.on('data', (chunk: Buffer) => {
     const lines = chunk.toString().trim().split(/\r?\n/);
@@ -56,7 +60,9 @@ export function spawnFfmpeg(opts: FfmpegOptions): FfmpegSession {
       const [k, v] = line.split('=');
       if (k === 'out_time_ms') {
         const ms = Number(v);
-        events.emit('encode-progress', { type: 'encode-progress', outTimeMs: ms });
+        const payload: any = { type: 'encode-progress', outTimeMs: ms };
+        if (opts.expectedDurationMs) payload.percent = Math.min(100, (ms / opts.expectedDurationMs) * 100);
+        events.emit('encode-progress', payload);
       }
     }
   });

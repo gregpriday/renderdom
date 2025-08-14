@@ -9,24 +9,21 @@ export interface RenderController {
   cancel: () => Promise<void>;
 }
 
-export function renderDOM(config: InternalConfig): RenderController {
+export function renderDOM(config: any): RenderController {
   const events = new EventEmitter<any>();
   let cancelled = false;
-
-  const promise = (async () => {
-    try {
-      const { progress } = await orchestrate(config, true);
-      // forward progress events
-      progress.events.on('capture-start', (e: any) => events.emit('capture-start', e));
-      progress.events.on('capture-progress', (e: any) => events.emit('capture-progress', e));
-      progress.events.on('encode-progress', (e: any) => events.emit('encode-progress', e));
-      progress.events.on('done', (e: any) => events.emit('done', e));
-      return { outputPath: config.outputPath };
-    } catch (err: any) {
+  const { progress, promise: run } = orchestrate(config, !!config.verbose);
+  // forward immediately
+  progress.events.on('capture-start', (e: any) => events.emit('capture-start', e));
+  progress.events.on('capture-progress', (e: any) => events.emit('capture-progress', e));
+  progress.events.on('encode-start', (e: any) => events.emit('encode-start', e));
+  progress.events.on('encode-progress', (e: any) => events.emit('encode-progress', e));
+  progress.events.on('done', (e: any) => events.emit('done', e));
+  const promise = run
+    .catch((err: any) => {
       events.emit('error', { type: 'error', message: err?.message ?? String(err) });
       throw err;
-    }
-  })();
+    });
 
   async function cancel() {
     cancelled = true;

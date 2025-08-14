@@ -18,6 +18,8 @@ export const ConfigSchema = z.object({
   pageUrl: z.string().optional(),
   html: z.string().optional(),
   frameTimeoutMs: z.number().int().positive().default(15000),
+  verbose: z.boolean().optional(),
+  debugFramesDir: z.string().optional(),
   adapterPath: z.string(),
   outputPath: z.string()
 });
