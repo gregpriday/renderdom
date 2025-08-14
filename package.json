@@ -1,0 +1,49 @@
+{
+  "name": "renderdom",
+  "version": "0.1.0",
+  "description": "Frame-accurate DOM renderer with Playwright + FFmpeg and JSONL progress.",
+  "license": "MIT",
+  "type": "module",
+  "main": "dist/index.cjs",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "renderdom": "dist/cli.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "prepare": "npm run build",
+    "build": "tsup src/index.ts src/cli.ts --dts --format esm,cjs --sourcemap",
+    "dev": "tsx src/cli.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint .",
+    "format": "prettier -w .",
+    "prepublishOnly": "npm run build"
+  },
+  "files": ["dist"],
+  "keywords": ["render", "ffmpeg", "playwright", "video", "dom", "frames", "jsonl"],
+  "dependencies": {
+    "commander": "^12.1.0",
+    "eventemitter3": "^5.0.1",
+    "execa": "^9.3.0",
+    "p-queue": "^8.0.1",
+    "playwright": "^1.46.0",
+    "temp-dir": "^3.0.0",
+    "tmp": "^0.2.3",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.0.0",
+    "@typescript-eslint/parser": "^8.0.0",
+    "eslint": "^9.7.0",
+    "prettier": "^3.3.3",
+    "tsup": "^8.1.0",
+    "tsx": "^4.16.0",
+    "typescript": "^5.5.4",
+    "vitest": "^2.0.5"
+  }
+}

@@ -1,0 +1,25 @@
+# Debug outputs
+*.mp4
+*.mov
+*.avi
+*.webm
+*.mkv
+
+# Test images
+*.png
+*.jpg
+*.jpeg
+
+# Debug logs
+*.log
+debug-*.txt
+debug-*.json
+
+# Temporary files
+temp-*
+test-*
+debug-*
+
+# Browser profiles
+.playwright-cache/
+chromium-*/
