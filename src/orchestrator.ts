@@ -10,7 +10,7 @@ import { captureFrameBuffer } from './capture.js';
 import { spawnFfmpeg } from './encode/ffmpeg.js';
 import { probeAudioDurationMs } from './encode/probe.js';
 
-export function orchestrate(config: any, verbose: boolean) {
+export function orchestrate(config: any, verbose: boolean, abortSignal?: AbortSignal) {
   const progress = new ProgressBus(verbose);
   const promise = (async () => {
     const concurrency = config.concurrency ?? Math.max(1, Math.floor(os.cpus().length / 2));
@@ -19,8 +19,22 @@ export function orchestrate(config: any, verbose: boolean) {
 
     const pages = await Promise.all(Array.from({ length: concurrency }, () => provider.newPage(config.width, config.height)));
 
+    // Helper for bootstrap timeouts
+    const withBootstrapTimeout = <T>(p: Promise<T>, ms: number, label: string) => {
+      let timeoutId: NodeJS.Timeout;
+      const timeout = new Promise<never>((_, rej) => {
+        timeoutId = setTimeout(() => rej(new Error(`Bootstrap timeout: ${label} after ${ms}ms`)), ms);
+      });
+      
+      return Promise.race([p, timeout]).finally(() => {
+        clearTimeout(timeoutId);
+      });
+    };
+
     // bootstrap each page
     await Promise.all(pages.map(async (p) => {
+      const bootstrapTimeout = config.frameTimeoutMs ?? 15000;
+      
       if (config.html) {
         const htmlDataUrl = 'data:text/html;charset=utf-8,' + encodeURIComponent(config.html);
         await p.goto(htmlDataUrl, { waitUntil: 'networkidle' });
@@ -35,21 +49,38 @@ export function orchestrate(config: any, verbose: boolean) {
         await freezeCssAnimations(p);
       }
       
-      await injectAdapter(p, config.adapterPath);
-      await ensureAssets(p);
+      await withBootstrapTimeout(injectAdapter(p, config.adapterPath), bootstrapTimeout, 'adapter injection');
+      await withBootstrapTimeout(ensureAssets(p), bootstrapTimeout, 'ensureAssets()');
       // Wait for fonts to be ready
-      await p.evaluate(() => document.fonts.ready);
+      await withBootstrapTimeout(p.evaluate(() => document.fonts.ready), bootstrapTimeout, 'fonts ready');
     }));
 
     // Determine total frames from first page
     const durationMs = await getDurationMs(pages[0]);
-    const totalFrames = config.endFrame !== undefined
-      ? config.endFrame - (config.startFrame ?? 0) + 1
-      : Math.floor((durationMs / 1000) * config.fps) - (config.startFrame ?? 0);
+    const startFrame = config.startFrame ?? 0;
+    
+    let totalFrames: number;
+    if (config.endFrame !== undefined) {
+      totalFrames = Math.max(0, config.endFrame - startFrame + 1);
+    } else {
+      const maxFrame = Math.floor((durationMs / 1000) * config.fps);
+      totalFrames = Math.max(0, maxFrame - startFrame);
+    }
+
+    // Handle edge case where there are no frames to render
+    if (totalFrames <= 0) {
+      progress.emit({ type: 'capture-start', totalFrames: 0 });
+      progress.emit({ type: 'done', outputPath: config.debugFramesDir || config.outputPath });
+      
+      await Promise.all(pages.map((p) => p.close()));
+      await provider.close();
+      
+      return { outputPath: config.debugFramesDir || config.outputPath };
+    }
 
     progress.emit({ type: 'capture-start', totalFrames });
 
-    const frameIndices = Array.from({ length: totalFrames }, (_, i) => (config.startFrame ?? 0) + i);
+    const frameIndices = Array.from({ length: totalFrames }, (_, i) => startFrame + i);
 
     // Calculate video duration and audio padding
     const videoDurationMs = (frameIndices.length / config.fps) * 1000;
@@ -100,11 +131,60 @@ export function orchestrate(config: any, verbose: boolean) {
     let done = 0;
     const queue = new PQueue({ concurrency });
 
-    const withTimeout = <T>(p: Promise<T>, ms: number, label: string) =>
-      Promise.race([p, new Promise<never>((_, rej) => setTimeout(() => rej(new Error(`Timeout: ${label} after ${ms}ms`)), ms))]);
+    // Frame ordering: buffer frames and write in sequence to FFmpeg
+    const pending = new Map<number, Buffer>();
+    let nextToWrite = config.startFrame ?? 0;
+    let flushInProgress = false;
+
+    const flushInOrder = async () => {
+      if (flushInProgress) return;
+      flushInProgress = true;
+      
+      try {
+        while (pending.has(nextToWrite)) {
+          const buf = pending.get(nextToWrite)!;
+          pending.delete(nextToWrite);
+          
+          if (config.debugFramesDir) {
+            // Write frame to disk
+            const ext = config.imageFormat === 'jpeg' ? 'jpg' : 'png';
+            const framePath = path.join(config.debugFramesDir, `${nextToWrite.toString().padStart(6, '0')}.${ext}`);
+            await fs.writeFile(framePath, buf);
+          } else if (ff) {
+            // Write to FFmpeg with backpressure handling
+            const needsDrain = !ff.stdin.write(buf);
+            if (needsDrain) {
+              await new Promise<void>((resolve) => {
+                ff.stdin.once('drain', resolve);
+              });
+            }
+          }
+          
+          nextToWrite++;
+        }
+      } finally {
+        flushInProgress = false;
+      }
+    };
+
+    const withTimeout = <T>(p: Promise<T>, ms: number, label: string) => {
+      let timeoutId: NodeJS.Timeout;
+      const timeout = new Promise<never>((_, rej) => {
+        timeoutId = setTimeout(() => rej(new Error(`Timeout: ${label} after ${ms}ms`)), ms);
+      });
+      
+      return Promise.race([p, timeout]).finally(() => {
+        clearTimeout(timeoutId);
+      });
+    };
 
     for (const [idx, frame] of frameIndices.entries()) {
       queue.add(async () => {
+        // Check if cancelled before processing frame
+        if (abortSignal?.aborted) {
+          throw new Error('Render operation was cancelled');
+        }
+        
         const worker = idx % pages.length; // simple round‑robin
         const page = pages[worker];
         const timeout = config.frameTimeoutMs ?? 15000;
@@ -116,35 +196,52 @@ export function orchestrate(config: any, verbose: boolean) {
         );
         const buf = await withTimeout(captureFrameBuffer(page, config.imageFormat, config.imageQuality), timeout, `screenshot(${frame})`);
         
-        if (config.debugFramesDir) {
-          // Write frame to disk
-          const ext = config.imageFormat === 'jpeg' ? 'jpg' : 'png';
-          const framePath = path.join(config.debugFramesDir, `${frame.toString().padStart(6, '0')}.${ext}`);
-          await fs.writeFile(framePath, buf);
-        } else if (ff) {
-          // Write to FFmpeg
-          ff.stdin.write(buf);
+        // Check again before writing
+        if (abortSignal?.aborted) {
+          throw new Error('Render operation was cancelled');
         }
+        
+        // Buffer frame and flush in order
+        pending.set(frame, buf);
+        await flushInOrder();
         
         done++;
         progress.emit({ type: 'capture-progress', done, total: totalFrames, percent: (done / totalFrames) * 100, frame });
       });
     }
 
-    await queue.onIdle();
-    
-    if (ff) {
-      ff.stdin.end();
-      await ff.wait();
+    try {
+      await queue.onIdle();
+      
+      if (ff) {
+        ff.stdin.end();
+        await ff.wait();
+      }
+
+      const finalOutputPath = config.debugFramesDir || config.outputPath;
+      progress.emit({ type: 'done', outputPath: finalOutputPath });
+
+      return { outputPath: finalOutputPath };
+    } catch (error) {
+      // Handle cancellation cleanup
+      if (abortSignal?.aborted || (error as Error)?.message?.includes('cancelled')) {
+        if (ff) {
+          try {
+            ff.stdin.destroy();
+          } catch {}
+        }
+        
+        // Clear pending queue
+        queue.clear();
+        
+        throw new Error('Render operation was cancelled');
+      }
+      throw error;
+    } finally {
+      // Always cleanup resources
+      await Promise.all(pages.map((p) => p.close().catch(() => {})));
+      await provider.close().catch(() => {});
     }
-
-    const finalOutputPath = config.debugFramesDir || config.outputPath;
-    progress.emit({ type: 'done', outputPath: finalOutputPath });
-
-    await Promise.all(pages.map((p) => p.close()));
-    await provider.close();
-    
-    return { outputPath: finalOutputPath };
   })();
   return { progress, promise };
 }

@@ -33,7 +33,7 @@ program.command('render')
   .option('--page-url <url>', 'page URL')
   .option('--html <path>', 'path to HTML file to inline')
   .option('--chromium-flag <flag>', 'repeatable chromium flag', (v, acc: string[]) => (acc ? acc.concat(v) : [v]))
-  .option('--disable-css-animations', 'disable CSS animations/transitions for determinism (default: false)')
+  .option('--disable-css-animations', 'disable CSS animations/transitions for determinism (default: true)')
   .option('--debug-frames-dir <path>', 'write frames to a directory instead of encoding')
   .option('--verbose', 'emit JSONL progress to stdout', false)
   .action(async (opts) => {
